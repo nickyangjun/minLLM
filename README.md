@@ -1,32 +1,27 @@
-# STLLM: 从零手写极简 LLM（教学版）
+# minLLM
 
-这个项目的目标不是“做一个很强的大模型”，而是通过**可读、可改、可实验**的最小实现，帮助你理解 LLM 的核心机制：
+一个基于 PyTorch 的极简中文字符级语言模型实现，面向学习与快速实验场景。项目提供从语料读取、词表构建、Transformer 建模到训练与生成的完整闭环，并通过 `INI` 配置文件支持参数管理。
 
-- 训练数据如何变成 token
-- 模型如何做下一 token 预测
-- 损失如何下降
-- 超参数如何影响训练与生成
+## 项目定位
 
-当前实现是一个**字符级（character-level）**的极简 Transformer 语言模型，入口在 `main.py`，支持通过 `config.ini` 配置训练参数与语料路径。
+- **目标**：提供一个结构清晰、可运行、可扩展的最小语言模型工程。
+- **范围**：用于理解训练流程与核心机制，不以生产级性能为目标。
+- **特点**：模块化拆分、配置驱动、注释完善，适合教学和个人研究。
 
----
+## 功能特性
 
-## 1. 项目学习目标（和你的需求对齐）
+- 基于 Transformer 的因果语言模型（Causal LM）
+- 字符级词表构建与编码/解码
+- 可配置训练参数与运行参数（`config.ini`）
+- 训练日志输出与自回归文本生成
+- 支持命令行临时覆盖部分配置（如训练步数、提示词）
 
-你希望通过“自己写一个极简 LLM 工程”学习训练和调参。这个仓库按这个目标设计：
+## 环境要求
 
-- **代码尽量短**：一个主文件就能看完主干逻辑
-- **注释尽量解释为什么**：不仅告诉你“做了什么”，还告诉你“为什么这样做”
-- **工程化最小闭环**：可安装依赖、可运行、可逐步扩展
-- **循序渐进**：从最小可跑版本，逐步加能力（见 `TODO.md`）
+- Python `>=3.10`
+- 依赖见 `requirements.txt`（当前核心依赖为 `torch`）
 
----
-
-## 2. 快速开始
-
-### 2.1 环境准备
-
-建议 Python 3.10+。
+## 安装
 
 ```bash
 python -m venv .venv
@@ -34,140 +29,47 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2.2 运行训练
+## 快速开始
+
+### 1) 使用默认配置训练
 
 ```bash
 python main.py
 ```
 
-可选覆盖配置中的部分参数（用于快速试跑）：
+### 2) 覆盖训练步数进行快速验证
 
 ```bash
-python main.py --train-steps 50 --prompt "人工智能"
+python main.py --train-steps 50
 ```
 
-你会看到：
+### 3) 覆盖生成提示词
 
-- 训练 step 与 loss 输出
-- 训练结束后的续写生成文本
-
----
-
-## 3. 当前模型结构（极简 Transformer）
-
-当前代码按职责拆分为：
-
-1. `model.py`：`Head`、`MultiHeadAttention`、`FeedForward`、`Block`、`MiniLLM`
-2. `data.py`：语料加载与清洗、字符词表构建、batch 采样
-3. `train.py`：配置读取、训练循环、生成逻辑
-4. `main.py`：命令行入口
-
-> 这是“教学最小结构”，保留了 Transformer 的关键组件，但规模很小，方便 CPU 学习。
-
----
-
-## 4. 训练时序图（从数据到参数更新）
-
-```mermaid
-sequenceDiagram
-    participant D as Data(text/tokens)
-    participant B as get_batch
-    participant M as MiniLLM
-    participant L as CrossEntropyLoss
-    participant O as Adam Optimizer
-
-    D->>B: 随机采样连续片段 x,y
-    B->>M: 前向传播(x)
-    M-->>L: logits
-    L-->>M: loss
-    M->>O: backward() 计算梯度
-    O->>M: step() 更新参数
-    Note over M,O: 重复多步直到 loss 收敛
+```bash
+python main.py --prompt "人工智能"
 ```
 
----
+## 训练与生成流程
 
-## 5. 为什么这样实现（关键设计原因）
+1. 从 `config.ini` 读取参数并合并默认值
+2. 加载并清洗语料，构建字符级词表
+3. 随机采样训练片段，执行 next-token 预测
+4. 使用交叉熵损失与 Adam 优化器更新参数
+5. 训练完成后进行自回归采样生成文本
 
-- **字符级词表**：最容易上手，不依赖分词器；缺点是序列更长、语义学习更慢。
-- **因果 mask**：保证第 t 个位置不能看到未来 token，符合语言模型训练规则。
-- **缩放点积注意力**：用 `head_size**-0.5` 稳定数值，避免 softmax 过饱和。
-- **Pre-LN 结构**：训练更稳定，尤其在层数增加时更明显。
-- **FFN 模块**：注意力负责“信息路由”，FFN负责“非线性变换”，两者缺一不可。
+## 可扩展方向
 
----
+- 引入训练/验证集切分与验证损失评估
+- 增加 temperature、top-k 等采样策略
+- 从字符级升级到子词级（BPE/SentencePiece）
+- 增加检查点保存/恢复与实验记录
+- 增加基础测试与 CI 流水线
 
-## 6. 建议的学习顺序（一步一步）
+## 注意事项
 
-### Step 1: 只跑通
-- 直接运行 `python main.py`
-- 观察 loss 是否下降
+- 当前默认语料较小，生成质量受限，适合快速迭代验证。
+- 若 `prompt` 含词表外字符，代码会自动回退到语料内可用字符。
 
-### Step 2: 改一个超参数只看一个现象
-- 例如改 `BLOCK_SIZE`：看长程依赖能力变化
-- 例如改 `EMBED_DIM`：看拟合能力与训练速度变化
+## License
 
-### Step 3: 做对照实验（固定随机种子）
-- 每次只改一个参数
-- 记录最终 loss、训练时间、生成样例
-
-### Step 4: 引入更大语料
-- 使用 `sample_corpus_zh.txt` 或你自己的文本
-- 注意先检查词表大小变化、数据长度变化
-
----
-
-## 7. 常用可调超参数与观察点
-
-- `EMBED_DIM`
-  - 大：表示能力更强，训练更慢
-  - 小：更快，但容易欠拟合
-
-- `NUM_HEADS`
-  - 多头可学习不同关系模式
-  - 需满足 `EMBED_DIM % NUM_HEADS == 0`
-
-- `NUM_LAYERS`
-  - 更深通常更强，但训练更慢且可能不稳定
-
-- `BLOCK_SIZE`
-  - 更大上下文窗口，能看更长依赖
-  - 计算开销升高
-
-- `LEARNING_RATE`
-  - 过大易震荡，过小收敛慢
-
----
-
-## 8. 训练素材建议（标准入门）
-
-当前仓库附带并默认使用：
-
-- `sample_corpus_zh.txt`：中文通用训练样例（默认由 `config.ini` 中的 `corpus_path` 指向）
-
-你也可以使用：
-
-- [THUCNews（清洗子集）](https://github.com/thunlp/THUCNews)
-- [人民日报语料（公开整理版本）](https://github.com/SophonPlus/ChineseNlpCorpus)
-- [中文维基导出文本（自行清洗）](https://dumps.wikimedia.org/zhwiki/)
-
-> 学习阶段建议先用小语料（几 KB 到几 MB），便于快速迭代。
-
----
-
-## 9. 下一步可扩展方向
-
-建议按 `TODO.md` 中的路线推进，例如：
-
-- 加训练/验证集切分
-- 加评估函数（val loss）
-- 引入 temperature/top-k 采样
-- 从字符级升级到子词级（BPE）
-- 支持从文件加载语料
-
----
-
-## 10. 免责声明
-
-这是学习型实现，不追求工业级性能或稳定性。  
-目标是帮助你理解原理和训练行为，而不是复现大规模生产模型能力。
+MIT License
