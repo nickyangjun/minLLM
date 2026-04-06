@@ -1,6 +1,7 @@
 import argparse
 import configparser
 from dataclasses import dataclass, fields
+from pathlib import Path
 from typing import Optional
 
 import torch
@@ -30,6 +31,7 @@ class TrainConfig:
     corpus_path: str
     prompt: str
     max_new_tokens: int
+    checkpoint_path: str
 
 
 def _default_config_dict() -> dict:
@@ -52,6 +54,7 @@ def _default_config_dict() -> dict:
         "corpus_path": "sample_corpus_zh.txt",
         "prompt": "你好",
         "max_new_tokens": 40,
+        "checkpoint_path": "checkpoints/minllm.pt",
     }
 
 
@@ -128,7 +131,50 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="可选覆盖配置中的 prompt",
     )
+    parser.add_argument(
+        "--mode",
+        choices=["train", "chat"],
+        default="train",
+        help="运行模式：train（训练并保存）或 chat（加载权重聊天）",
+    )
     return parser
+
+
+def _save_checkpoint(
+    checkpoint_path: str,
+    model: MiniLLM,
+    model_cfg: ModelConfig,
+    dataset,
+) -> None:
+    path = Path(checkpoint_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "model_state_dict": model.state_dict(),
+        "model_cfg": {
+            "embed_dim": model_cfg.embed_dim,
+            "block_size": model_cfg.block_size,
+            "num_heads": model_cfg.num_heads,
+            "num_layers": model_cfg.num_layers,
+        },
+        "chars": sorted(dataset.stoi.keys()),
+    }
+    torch.save(payload, checkpoint_path)
+
+
+def _load_checkpoint(checkpoint_path: str, device: str) -> dict:
+    if not Path(checkpoint_path).exists():
+        raise FileNotFoundError(
+            f"未找到 checkpoint: {checkpoint_path}。请先运行训练模式生成权重。"
+        )
+    return torch.load(checkpoint_path, map_location=device)
+
+
+def _build_codec_from_chars(chars: list[str]):
+    stoi = {ch: i for i, ch in enumerate(chars)}
+    itos = {i: ch for i, ch in enumerate(chars)}
+    encode = lambda s: [stoi[c] for c in s]
+    decode = lambda l: "".join([itos[i] for i in l])
+    return stoi, encode, decode
 
 
 def run_training(
@@ -194,3 +240,53 @@ def run_training(
     output = model.generate(context, max_new_tokens=cfg.max_new_tokens)
     print("输入：", prompt)
     print("生成：", dataset.decode(output[0].tolist()))
+    _save_checkpoint(cfg.checkpoint_path, model, model_cfg, dataset)
+    print(f"\n已保存模型权重：{cfg.checkpoint_path}")
+
+
+def run_chat(config_path: str) -> None:
+    """
+    交互式聊天模式：
+    - 仅加载 checkpoint，不执行训练
+    - 连续读取用户输入并生成回复
+    """
+    cfg = load_config(config_path)
+    # 尝试启用 readline，改善终端中的行编辑体验（退格、方向键、历史记录）。
+    # 在少数环境不可用时静默降级，不影响主流程。
+    try:
+        import readline  # noqa: F401
+    except Exception:
+        pass
+
+    ckpt = _load_checkpoint(cfg.checkpoint_path, cfg.device)
+
+    model_cfg = ModelConfig(**ckpt["model_cfg"])
+    chars = ckpt["chars"]
+    stoi, encode, decode = _build_codec_from_chars(chars)
+
+    model = MiniLLM(model_cfg, vocab_size=len(chars), device=cfg.device).to(cfg.device)
+    model.load_state_dict(ckpt["model_state_dict"])
+    model.eval()
+
+    print("进入聊天模式（输入 exit 退出）")
+    print(f"已加载权重：{cfg.checkpoint_path}\n")
+
+    while True:
+        user_input = input("你> ").strip()
+        if user_input.lower() in {"exit", "quit"}:
+            print("已退出聊天模式。")
+            break
+        if not user_input:
+            continue
+
+        prompt = "".join(ch for ch in user_input if ch in stoi)
+        if not prompt:
+            print("模型> 输入字符均不在词表中，请尝试使用语料中出现过的字符。")
+            continue
+
+        context = torch.tensor([encode(prompt)], device=cfg.device)
+        output = model.generate(context, max_new_tokens=cfg.max_new_tokens)
+        text = decode(output[0].tolist())
+        # 只展示新生成部分，更像“回复”而非续写原提示。
+        reply = text[len(prompt) :]
+        print(f"模型> {reply}")

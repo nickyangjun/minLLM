@@ -1,4 +1,4 @@
-from train import build_arg_parser, run_training
+from train import build_arg_parser, run_chat, run_training
 
 
 def main() -> None:
@@ -9,6 +9,9 @@ def main() -> None:
     """
     parser = build_arg_parser()
     args = parser.parse_args()
+    if args.mode == "chat":
+        run_chat(args.config)
+        return
     run_training(args.config, args.train_steps, args.prompt)
 
 

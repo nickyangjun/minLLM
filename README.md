@@ -14,6 +14,8 @@
 - 字符级词表构建与编码/解码
 - 可配置训练参数与运行参数（`config.ini`）
 - 训练日志输出与自回归文本生成
+- 训练后自动保存 checkpoint，支持后续免训练加载
+- 支持交互式聊天模式（`chat`）
 - 支持命令行临时覆盖部分配置（如训练步数、提示词）
 
 ## 环境要求
@@ -29,33 +31,67 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## 快速开始
+## 使用方法
 
-### 1) 使用默认配置训练
-
-```bash
-python main.py
-```
-
-### 2) 覆盖训练步数进行快速验证
+### 1) 训练模式（保存权重）
 
 ```bash
-python main.py --train-steps 50
+python main.py --mode train
 ```
 
-### 3) 覆盖生成提示词
+训练结束后会自动保存权重，默认路径为 `checkpoints/minllm.pt`（可在 `config.ini` 的 `[checkpoint]` 区块修改）。
+
+### 2) 聊天模式（加载权重，不再训练）
 
 ```bash
-python main.py --prompt "人工智能"
+python main.py --mode chat
 ```
 
-## 训练与生成流程
+进入后输入文本即可生成回复，输入 `exit` 或 `quit` 退出。
+
+### 3) 快速训练验证（覆盖训练步数）
+
+```bash
+python main.py --mode train --train-steps 50
+```
+
+### 4) 覆盖提示词（训练模式下的演示生成）
+
+```bash
+python main.py --mode train --prompt "人工智能"
+```
+
+## 运行流程
+
+### 训练模式（`--mode train`）
 
 1. 从 `config.ini` 读取参数并合并默认值
 2. 加载并清洗语料，构建字符级词表
 3. 随机采样训练片段，执行 next-token 预测
 4. 使用交叉熵损失与 Adam 优化器更新参数
-5. 训练完成后进行自回归采样生成文本
+5. 训练完成后生成示例文本，并保存 checkpoint
+
+### 聊天模式（`--mode chat`）
+
+1. 从配置中读取 `checkpoint_path`
+2. 加载模型结构与权重
+3. 进入命令行交互循环，按输入逐轮生成
+
+## 测试方法（手动 smoke test）
+
+建议每次改动后至少执行以下检查：
+
+1. **训练链路检查**
+```bash
+python main.py --mode train --train-steps 1
+```
+预期：能看到 loss 输出，并提示已保存 checkpoint。
+
+2. **聊天链路检查**
+```bash
+python main.py --mode chat
+```
+预期：出现 `你>` 输入提示，输入文本后有 `模型>` 回复，`exit` 可退出。
 
 ## 可扩展方向
 
@@ -68,7 +104,8 @@ python main.py --prompt "人工智能"
 ## 注意事项
 
 - 当前默认语料较小，生成质量受限，适合快速迭代验证。
-- 若 `prompt` 含词表外字符，代码会自动回退到语料内可用字符。
+- 若输入含词表外字符，程序会过滤并在必要时回退到可用字符。
+- 首次聊天前需先完成至少一次训练，以生成 checkpoint。
 
 ## License
 
